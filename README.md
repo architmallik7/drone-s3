@@ -74,3 +74,4 @@ docker run --rm \
   -w $(pwd) \
   plugins/s3 --dry-run
 ```
+.
