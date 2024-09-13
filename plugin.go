@@ -281,21 +281,38 @@ func matchExtension(match string, stringMap map[string]string) string {
 }
 
 func assumeRole(roleArn, roleSessionName, externalID string) *credentials.Credentials {
-	sess, _ := session.NewSession()
-	client := sts.New(sess)
-	duration := time.Hour * 1
-	stsProvider := &stscreds.AssumeRoleProvider{
-		Client:          client,
-		Duration:        duration,
-		RoleARN:         roleArn,
-		RoleSessionName: roleSessionName,
-	}
+    log.WithFields(log.Fields{
+        "roleArn":         roleArn,
+        "roleSessionName": roleSessionName,
+        "externalID":      externalID,
+    }).Info("Attempting to assume role")
 
-	if externalID != "" {
-		stsProvider.ExternalID = &externalID
-	}
+    sess, _ := session.NewSession()
+    client := sts.New(sess)
+    duration := time.Hour * 1
+    stsProvider := &stscreds.AssumeRoleProvider{
+        Client:          client,
+        Duration:        duration,
+        RoleARN:         roleArn,
+        RoleSessionName: roleSessionName,
+    }
 
-	return credentials.NewCredentials(stsProvider)
+    if externalID != "" {
+        stsProvider.ExternalID = &externalID
+        log.WithField("externalID", externalID).Info("Using external ID for assume role")
+    }
+
+    creds := credentials.NewCredentials(stsProvider)
+
+    // Test the credentials
+    _, err := creds.Get()
+    if err != nil {
+        log.WithError(err).Error("Failed to assume role")
+    } else {
+        log.Info("Successfully assumed role")
+    }
+
+    return creds
 }
 
 // resolveKey is a helper function that returns s3 object key where file present at srcPath is uploaded to.
@@ -434,6 +451,13 @@ func (p *Plugin) downloadS3Objects(client *s3.S3, sourceDir string) error {
 
 // createS3Client creates and returns an S3 client based on the plugin configuration
 func (p *Plugin) createS3Client() *s3.S3 {
+    log.WithFields(log.Fields{
+        "Region":     p.Region,
+        "Endpoint":   p.Endpoint,
+        "PathStyle":  p.PathStyle,
+        "AssumeRole": p.AssumeRole,
+    }).Info("Creating S3 client")
+
     conf := &aws.Config{
         Region:           aws.String(p.Region),
         Endpoint:         &p.Endpoint,
@@ -443,26 +467,34 @@ func (p *Plugin) createS3Client() *s3.S3 {
 
     sess, err := session.NewSession(conf)
     if err != nil {
-        log.Fatalf("failed to create AWS session: %v", err)
+        log.WithError(err).Fatal("Failed to create AWS session")
     }
 
     if p.Key != "" && p.Secret != "" {
+        log.Info("Using static credentials")
         conf.Credentials = credentials.NewStaticCredentials(p.Key, p.Secret, "")
     } else if p.IdToken != "" && p.AssumeRole != "" {
+        log.Info("Using assumeRoleWithWebIdentity")
         creds, err := assumeRoleWithWebIdentity(sess, p.AssumeRole, p.AssumeRoleSessionName, p.IdToken)
         if err != nil {
-            log.Fatalf("failed to assume role with web identity: %v", err)
+            log.WithError(err).Fatal("Failed to assume role with web identity")
         }
         conf.Credentials = creds
     } else if p.AssumeRole != "" {
+        log.WithFields(log.Fields{
+            "AssumeRole":            p.AssumeRole,
+            "AssumeRoleSessionName": p.AssumeRoleSessionName,
+            "ExternalID":            p.ExternalID,
+        }).Info("Using assumeRole")
         conf.Credentials = assumeRole(p.AssumeRole, p.AssumeRoleSessionName, p.ExternalID)
     } else {
-        log.Warn("AWS Key and/or Secret not provided (falling back to ec2 instance profile)")
+        log.Warn("AWS Key and/or Secret not provided (falling back to EC2 instance profile)")
     }
 
     client := s3.New(sess, conf)
 
     if len(p.UserRoleArn) > 0 {
+        log.WithField("UserRoleArn", p.UserRoleArn).Info("Using user role ARN")
         confRoleArn := aws.Config{
             Region:      aws.String(p.Region),
             Credentials: stscreds.NewCredentials(sess, p.UserRoleArn),
