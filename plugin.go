@@ -488,7 +488,12 @@ func (p *Plugin) createS3Client() *s3.S3 {
         "CrossAccountRoleARN": p.CrossAccountRoleARN,
         "ExternalID":          p.ExternalID,
         "TestRegion":          p.TestRegion,
-    }).Info("Creating S3 client")
+        "Bucket":              p.Bucket,
+        "AssumeRole":          p.AssumeRole,
+        "AssumeRoleSessionName": p.AssumeRoleSessionName,
+        "UserRoleArn":         p.UserRoleArn,
+    }).Info("Creating S3 client with connector details")
+
     conf := &aws.Config{
         Region:           aws.String(p.Region),
         Endpoint:         &p.Endpoint,
@@ -496,7 +501,7 @@ func (p *Plugin) createS3Client() *s3.S3 {
         S3ForcePathStyle: aws.Bool(p.PathStyle),
     }
 
-	if p.TestRegion != "" {
+    if p.TestRegion != "" {
         conf.Region = aws.String(p.TestRegion)
     }
 
