@@ -29,6 +29,11 @@ type Plugin struct {
 	AssumeRoleSessionName string
 	Bucket                string
 	UserRoleArn           string
+	UseIRSA              bool
+    EnableCrossAccount   bool
+    CrossAccountRoleARN  string
+
+    TestRegion           string
 
 	// if not "", enable server-side encryption
 	// valid values are:
@@ -105,6 +110,29 @@ type Plugin struct {
 
 // Exec runs the plugin
 func (p *Plugin) Exec() error {
+	log.WithFields(log.Fields{
+        "UseIRSA":             p.UseIRSA,
+        "EnableCrossAccount":  p.EnableCrossAccount,
+        "CrossAccountRoleARN": p.CrossAccountRoleARN,
+        "ExternalID":          p.ExternalID,
+        "TestRegion":          p.TestRegion,
+    }).Info("Received AWS connector settings")
+
+	if p.UseIRSA {
+        log.Info("Using IRSA for authentication")
+    }
+
+	if p.EnableCrossAccount {
+        log.WithFields(log.Fields{
+            "CrossAccountRoleARN": p.CrossAccountRoleARN,
+            "ExternalID":          p.ExternalID,
+        }).Info("Cross-account access enabled")
+    }
+
+    if p.TestRegion != "" {
+        log.WithField("TestRegion", p.TestRegion).Info("Test region specified")
+    }
+	
 	if p.Download {
 		p.Source = normalizePath(p.Source)
 		p.Target = normalizePath(p.Target)
@@ -452,17 +480,24 @@ func (p *Plugin) downloadS3Objects(client *s3.S3, sourceDir string) error {
 // createS3Client creates and returns an S3 client based on the plugin configuration
 func (p *Plugin) createS3Client() *s3.S3 {
     log.WithFields(log.Fields{
-        "Region":     p.Region,
-        "Endpoint":   p.Endpoint,
-        "PathStyle":  p.PathStyle,
-        "AssumeRole": p.AssumeRole,
+        "Region":              p.Region,
+        "Endpoint":            p.Endpoint,
+        "PathStyle":           p.PathStyle,
+        "UseIRSA":             p.UseIRSA,
+        "EnableCrossAccount":  p.EnableCrossAccount,
+        "CrossAccountRoleARN": p.CrossAccountRoleARN,
+        "ExternalID":          p.ExternalID,
+        "TestRegion":          p.TestRegion,
     }).Info("Creating S3 client")
-
     conf := &aws.Config{
         Region:           aws.String(p.Region),
         Endpoint:         &p.Endpoint,
         DisableSSL:       aws.Bool(strings.HasPrefix(p.Endpoint, "http://")),
         S3ForcePathStyle: aws.Bool(p.PathStyle),
+    }
+
+	if p.TestRegion != "" {
+        conf.Region = aws.String(p.TestRegion)
     }
 
     sess, err := session.NewSession(conf)
